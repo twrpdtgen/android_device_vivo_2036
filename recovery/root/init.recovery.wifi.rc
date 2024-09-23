@@ -1,0 +1,143 @@
+on init
+    export ANDROID_DNS_MODE local
+
+    #mkdir /system/etc
+    #mkdir /data/misc 0777
+    #mkdir /data/misc/wifi 0777
+    #mkdir /data/misc/wifi/sockets 0777
+    #mkdir /data/misc/wifi/wpa_supplicant 0777
+
+    #mkdir /data/vendor/wifi 0777
+    #mkdir /data/vendor/wifi/sockets 0777
+    #mkdir /data/vendor/wifi/hostapd 0770
+    #mkdir /data/vendor/wifi/hostapd/ctrl 0770
+    #mkdir /data/vendor/wifi/wpa_supplicant 0770
+    #mkdir /data/vendor/wifi/wigig_hostapd 0770
+    #mkdir /data/misc/wifi/wpa_supplicant 0770
+    #mkdir /data/vendor/wifi/wpa 0777
+    #mkdir /data/vendor/wifi/wpa/sockets 0777
+
+    #mkdir /data/vendor 0777 root root
+    #mkdir /data/vendor/tombstones 0777 system system
+    #mkdir /data/vendor/tombstones/rfs 0777 rfs system
+    #mkdir /data/vendor/tombstones/rfs/modem 0777 rfs system
+
+    mkdir /vendor/firmware 0777 root shell
+    mkdir /vendor/rfs 0777 root shell
+    mkdir /vendor/rfs/msm 0777 root shell
+    mkdir /vendor/rfs/msm/mpss 0777 root shell
+    mkdir /vendor/rfs/msm/mpss/readonly 0777 root shell
+    mkdir /vendor/rfs/msm/mpss/readonly/vendor 0777 root shell
+
+    symlink /data/vendor/tombstones/rfs/modem /vendor/rfs/msm/mpss/ramdumps
+    symlink /firmware /vendor/rfs/msm/mpss/readonly/firmware
+    symlink /mnt/vendor/persist/rfs/msm/mpss /vendor/rfs/msm/mpss/readwrite
+    symlink /mnt/vendor/persist/rfs/shared /vendor/rfs/msm/mpss/shared
+    symlink /mnt/vendor/persist/hlos_rfs/shared /vendor/rfs/msm/mpss/hlos
+    symlink /vendor/firmware /vendor/rfs/msm/mpss/readonly/vendor/firmware
+    symlink /vendor/firmware_mnt /vendor/rfs/msm/mpss/readonly/vendor/firmware_mnt
+
+    #mkdir /data/misc/dhcp 0770 dhcp dhcp
+    #chown dhcp dhcp /data/misc/dhcp
+
+    symlink /system/bin/vivotool /system/bin/ping
+    symlink /system/etc/firmware /etc/firmware
+    symlink  /vendor/etc/wifi/WCNSS_qcom_cfg.ini /vendor/firmware/wlan/qca_cld/WCNSS_qcom_cfg.ini
+
+    mkdir /apps 0770
+    mkdir /config
+
+    symlink /cache/recovery/wpa_supplicant.conf /data/misc/wifi/wpa_supplicant.conf
+
+on boot
+    chown radio wakelock /sys/power/wake_lock
+    chown radio wakelock /sys/power/wake_unlock
+    chmod 0660 /sys/power/wake_lock
+    chmod 0660 /sys/power/wake_unlock
+
+on property:wcnss.start=1
+    mount vfat /dev/block/bootdevice/by-name/modem /vendor/firmware_mnt ro shortname=lower,uid=1000,gid=1000,dmask=227,fmask=337
+
+service subsys /system/bin/subsys
+    disabled
+    user root
+    oneshot
+    seclabel u:r:recovery:s0
+
+service irsc_util /vendor/bin/irsc_util "/vendor/etc/sec_config"
+    disabled
+    user root
+    oneshot
+    seclabel u:r:recovery:s0
+
+service vendor.qrtr-ns /vendor/bin/qrtr-ns -f
+    disabled
+    user root
+    group root
+    capabilities NET_BIND_SERVICE
+    seclabel u:r:recovery:s0
+
+service vendor.rmt_storage /vendor/bin/rmt_storage
+    disabled
+    user root
+    ioprio rt 0
+    seclabel u:r:recovery:s0
+
+service vendor.tftp_server /vendor/bin/tftp_server
+    disabled
+    user root
+    seclabel u:r:recovery:s0
+    disabled
+
+service vendor.per_mgr /vendor/bin/pm-service
+    disabled
+    user root
+    group root
+    seclabel u:r:recovery:s0
+
+service vendor.pd_mapper /vendor/bin/pd-mapper
+    disabled
+    user root
+    group root
+    seclabel u:r:recovery:s0
+
+service vendor.per_proxy /vendor/bin/pm-proxy
+    disabled
+    user root
+    group root
+    seclabel u:r:recovery:s0
+
+service cnss-daemon /vendor/bin/cnss-daemon -n -l
+    disabled
+    user root
+    group root system inet net_admin wifi
+    capabilities NET_ADMIN
+    seclabel u:r:recovery:s0
+
+on property:survival.start.service=true
+    start vendor.pd_mapper
+    start vendor.per_proxy
+    start vendor.per_mgr
+    start vendor.qrtr-ns
+    start vendor.rmt_storage
+    start vendor.tftp_server
+    start cnss-daemon
+
+service wpa_supplicant /vendor/bin/wpa_supplicant -Dnl80211 -iwlan0 -dd -O/cache/recovery/sockets -c/cache/recovery/wpa_supplicant.conf
+    disabled
+    seclabel u:r:hal_wifi_supplicant_default:s0
+
+service dhcpcd /system/bin/dhcpcd wlan0 -B
+    disabled
+    oneshot
+    seclabel u:r:recovery:s0
+
+on property:qcomwlan.driver.load=true
+    insmod /vendor/bin/qca_cld3_wlan.ko
+    #exec_background u:r:recovery:s0 -- /system/bin/modprobe -a -d /system/bin/ qca_cld3_wlan
+
+on property:supplicant.status=running
+    start wpa_supplicant
+
+on property:supplicant.status=stopped
+    stop wpa_supplicant
